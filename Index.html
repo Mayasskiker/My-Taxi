@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>عداد التكسي المطور</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1a1a1a; color: #fff; text-align: center; padding: 15px; margin: 0; }
+        h2 { color: #f1c40f; margin-bottom: 15px; }
+        .config-section { background: #2c3e50; padding: 15px; border-radius: 12px; margin-bottom: 15px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        label { font-size: 0.8em; color: #bdc3c7; display: block; margin-bottom: 5px; }
+        input { width: 90%; padding: 8px; border-radius: 5px; border: none; text-align: center; font-size: 1em; }
+        
+        .main-display { background: #000; padding: 25px; border-radius: 20px; border: 2px solid #333; margin-bottom: 20px; }
+        .total-label { color: #2ecc71; font-size: 1.2em; }
+        .total-amount { font-size: 3.5em; font-weight: bold; color: #2ecc71; margin: 5px 0; }
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid #333; pt: 15px; margin-top: 15px; }
+        .stat-box { padding: 10px; }
+        .stat-val { font-size: 1.4em; display: block; color: #f1c40f; }
+        .stat-label { font-size: 0.8em; color: #888; }
+
+        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        button { padding: 18px; border: none; border-radius: 12px; font-size: 1.2em; font-weight: bold; cursor: pointer; }
+        #start-btn { background: #27ae60; color: white; grid-column: span 2; }
+        #stop-btn { background: #c0392b; color: white; grid-column: span 2; }
+        
+        .status-bar { margin-top: 10px; font-size: 0.85em; color: #e67e22; height: 20px; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+    <h2>🚖 عداد التكسي الذكي</h2>
+
+    <div class="config-section" id="config-area">
+        <div>
+            <label>سعر الكيلو</label>
+            <input type="number" id="rateKm" value="5000">
+        </div>
+        <div>
+            <label>سعر الدقيقة</label>
+            <input type="number" id="rateMin" value="1000">
+        </div>
+    </div>
+
+    <div class="main-display">
+        <div class="total-label">المجموع الكلي</div>
+        <div class="total-amount" id="display-total">0</div>
+        <div style="color: #2ecc71; margin-bottom: 10px;">ليرة سورية</div>
+        
+        <div class="stats-grid">
+            <div class="stat-box">
+                <span class="stat-label">المسافة</span>
+                <span class="stat-val"><span id="display-km">0.00</span> كم</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-label">الزمن</span>
+                <span class="stat-val"><span id="display-time">0:00</span> د</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="status-bar" id="status">جاهز للانطلاق</div>
+
+    <div class="controls">
+        <button id="start-btn" onclick="startTrip()">ابدأ الرحلة الآن</button>
+        <button id="stop-btn" class="hidden" onclick="stopTrip()">إنهاء وحساب الأجرة</button>
+    </div>
+
+    <script>
+        let watchId = null;
+        let timerId = null;
+        let wakeLock = null;
+        
+        let distance = 0;
+        let seconds = 0;
+        let lastPos = null;
+
+        // وظيفة منع الشاشة من الإغلاق
+        async function stayAwake() {
+            if ('wakeLock' in navigator) {
+                try {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                } catch (err) {
+                    console.log("WakeLock failed");
+                }
+            }
+        }
+
+        function startTrip() {
+            // التحقق من GPS
+            if (!navigator.geolocation) {
+                alert("جهازك لا يدعم تحديد الموقع");
+                return;
+            }
+
+            // تصفير القيم
+            distance = 0;
+            seconds = 0;
+            lastPos = null;
+            
+            // تفعيل منع النوم
+            stayAwake();
+
+            // بدء حساب الوقت (دقيقة بدقيقة)
+            timerId = setInterval(() => {
+                seconds++;
+                updateUI();
+            }, 1000);
+
+            // بدء تتبع المسافة
+            watchId = navigator.geolocation.watchPosition(pos => {
+                const current = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+                if (lastPos) {
+                    const d = calculateDistance(lastPos.lat, lastPos.lon, current.lat, current.lon);
+                    if (d > 0.005) { // تحرك أكثر من 5 أمتار
+                        distance += d;
+                    }
+                }
+                lastPos = current;
+                updateUI();
+            }, err => {
+                document.getElementById('status').innerText = "خطأ في تحديد الموقع!";
+            }, { enableHighAccuracy: true });
+
+            document.getElementById('start-btn').classList.add('hidden');
+            document.getElementById('stop-btn').classList.remove('hidden');
+            document.getElementById('config-area').style.opacity = "0.5";
+            document.getElementById('status').innerText = "الرحلة مستمرة... العداد يعمل";
+        }
+
+        function stopTrip() {
+            navigator.geolocation.clearWatch(watchId);
+            clearInterval(timerId);
+            if (wakeLock) wakeLock.release();
+            
+            document.getElementById('start-btn').classList.remove('hidden');
+            document.getElementById('stop-btn').classList.add('hidden');
+            document.getElementById('config-area').style.opacity = "1";
+            document.getElementById('status').innerText = "تم إنهاء الرحلة.";
+        }
+
+        function updateUI() {
+            const rKm = parseFloat(document.getElementById('rateKm').value) || 0;
+            const rMin = parseFloat(document.getElementById('rateMin').value) || 0;
+
+            const costDist = distance * rKm;
+            const costTime = (seconds / 60) * rMin;
+            const total = Math.floor(costDist + costTime);
+
+            document.getElementById('display-total').innerText = total.toLocaleString();
+            document.getElementById('display-km').innerText = distance.toFixed(2);
+            
+            const m = Math.floor(seconds / 60);
+            const s = seconds % 60;
+            document.getElementById('display-time').innerText = `${m}:${s < 10 ? '0'+s : s}`;
+        }
+
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }
+    </script>
+</body>
+</html>
